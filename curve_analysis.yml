@@ -1,0 +1,97 @@
+name: Performance Curve Analysis
+on:
+  push:
+    paths:
+      - '**/*F1_curve.png'
+      - '**/*PR_curve.png'
+      - '**/*curve.png'
+  workflow_dispatch:
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Set up Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: '3.8'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install numpy matplotlib opencv-python pandas pillow
+
+    - name: Run curve analysis
+      run: |
+        python -c "
+        import sys
+        sys.path.append('.')
+        from curve_analysis import CurveAnalyzer
+        import json
+        
+        analyzer = CurveAnalyzer('BoxF1_curve.png')
+        analyzer.load_image()
+        analysis = analyzer.analyze_performance()
+        
+        with open('analysis_results.json', 'w') as f:
+            json.dump(analysis, f, indent=2)
+        
+        # Save visualization
+        fig = analyzer.plot_analysis()
+        fig.savefig('analysis_report.png')
+        "
+
+    - name: Create analysis report
+      run: |
+        echo "# Performance Analysis Report" > report.md
+        echo "Generated at: $(date -u)" >> report.md
+        echo "## Analysis Results" >> report.md
+        echo '```json' >> report.md
+        cat analysis_results.json >> report.md
+        echo '```' >> report.md
+        echo "## Visualization" >> report.md
+        echo "![Analysis Report](analysis_report.png)" >> report.md
+
+    - name: Upload analysis artifacts
+      uses: actions/upload-artifact@v2
+      with:
+        name: analysis-report
+        path: |
+          analysis_results.json
+          analysis_report.png
+          report.md
+
+    - name: Create or Update Analysis Issue
+      uses: actions/github-script@v3
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        script: |
+          const fs = require('fs');
+          const report = fs.readFileSync('report.md', 'utf8');
+          
+          const issues = await github.issues.listForRepo({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            labels: ['performance-analysis'],
+            state: 'open'
+          });
+          
+          if (issues.data.length > 0) {
+            await github.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issues.data[0].number,
+              body: report
+            });
+          } else {
+            await github.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: 'Performance Analysis Report',
+              body: report,
+              labels: ['performance-analysis']
+            });
+          }
